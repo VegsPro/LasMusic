@@ -20,16 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * LasMusic Player — fixes the two main pain points of many YT Music clients:
- *
- * 1. Progressive / streaming loading:
- *    - Uses Media3 ExoPlayer with tuned DefaultLoadControl
- *    - Starts playback as soon as enough buffer is available (does NOT wait for full download)
- *    - Prepares the next track in the background while current is playing
- *
- * 2. Infinite continuous playlist:
- *    - When remaining items in queue drop below threshold, automatically
- *      appends similar / related tracks so playback never stops.
+ * Progressive streaming + infinite playlist player.
  */
 class MusicPlayer(
     private val context: Context,
@@ -47,13 +38,12 @@ class MusicPlayer(
     private var infiniteMode = true
     private var recommendationJob: Job? = null
 
-    // Tuned load control for smooth progressive streaming
     private val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
-            /* minBufferMs = */ 15_000,          // keep at least 15s
-            /* maxBufferMs = */ 50_000,          // up to 50s
-            /* bufferForPlaybackMs = */ 1_500,   // start after 1.5s
-            /* bufferForPlaybackAfterRebufferMs = */ 3_000
+            15_000,  // minBuffer
+            50_000,  // maxBuffer
+            1_500,   // bufferForPlayback
+            3_000    // bufferForPlaybackAfterRebuffer
         )
         .setPrioritizeTimeOverSizeThresholds(true)
         .build()
@@ -62,7 +52,7 @@ class MusicPlayer(
         .setAllowCrossProtocolRedirects(true)
         .setConnectTimeoutMs(10_000)
         .setReadTimeoutMs(15_000)
-        .setUserAgent("LasMusic/1.0")
+        .setUserAgent("LasMusic/1.0.2")
 
     private val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
 
@@ -86,13 +76,11 @@ class MusicPlayer(
 
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     _currentItem.value = mediaItem
-                    // When we move to a new item, check if we need more recommendations
                     maybeRequestMoreTracks()
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_ENDED) {
-                        // Safety net: if somehow we reach real end, request more
                         maybeRequestMoreTracks(force = true)
                     }
                 }
@@ -100,12 +88,12 @@ class MusicPlayer(
         }
 
     fun setQueue(items: List<MediaItem>, startIndex: Int = 0) {
+        if (items.isEmpty()) return
         _queue.value = items
+        // Important: do NOT seek next/previous — that was causing wrong track to start
         player.setMediaItems(items, startIndex, 0L)
         player.prepare()
-        // Immediately start preparing next items for seamless transition
-        player.seekToNextMediaItem() // internal prepare
-        player.seekToPreviousMediaItem()
+        _currentItem.value = items.getOrNull(startIndex)
     }
 
     fun addToQueue(items: List<MediaItem>) {
@@ -137,7 +125,9 @@ class MusicPlayer(
     }
 
     fun seekToPrevious() {
-        player.seekToPreviousMediaItem()
+        if (player.hasPreviousMediaItem()) {
+            player.seekToPreviousMediaItem()
+        }
     }
 
     fun setInfiniteMode(enabled: Boolean) {
@@ -145,25 +135,17 @@ class MusicPlayer(
         if (enabled) maybeRequestMoreTracks()
     }
 
-    /**
-     * Core of the "never stop" feature.
-     * When remaining tracks are low, ask the recommender for similar tracks
-     * and append them to the live queue. Playback continues without interruption.
-     */
     private fun maybeRequestMoreTracks(force: Boolean = false) {
         if (!infiniteMode) return
-
         val remaining = player.mediaItemCount - player.currentMediaItemIndex - 1
         if (!force && remaining > 2) return
 
         recommendationJob?.cancel()
         recommendationJob = scope.launch(Dispatchers.IO) {
-            // Avoid spamming
-            delay(300)
+            delay(400)
             val current = player.currentMediaItem ?: return@launch
-            val similar = SimilarTrackProvider.getSimilar(current, limit = 8)
+            val similar = SimilarTrackProvider.getSimilar(current, limit = 6)
             if (similar.isNotEmpty()) {
-                // Switch to main thread for player mutation
                 launch(Dispatchers.Main) {
                     addToQueue(similar)
                 }
