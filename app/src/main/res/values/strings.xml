@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LasMusic</string>
+    <string name="home">Главная</string>
+    <string name="library">Библиотека</string>
+    <string name="search">Поиск</string>
+    <string name="now_playing">Сейчас играет</string>
+    <string name="infinite_mode">Бесконечный режим</string>
+    <string name="similar_tracks">Похожие треки</string>
+</resources>
