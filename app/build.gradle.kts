@@ -21,27 +21,18 @@ android {
         }
     }
 
-    signingConfigs {
-        create("release") {
-            storeFile = file("../release.keystore")
-            storePassword = "LasMusic2026Secure!"
-            keyAlias = "release"
-            keyPassword = "LasMusic2026Secure!"
-        }
-    }
-
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            // Signing will be added via GitHub Secrets later
         }
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            // default debug signing
         }
     }
 
