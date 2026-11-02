@@ -54,7 +54,7 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
+    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
@@ -78,9 +78,6 @@ dependencies {
 
     // Coil for artwork
     implementation("io.coil-kt:coil-compose:2.7.0")
-
-    // Liquid Glass (Kyant Backdrop)
-    implementation("io.github.kyant0:backdrop:2.0.1")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
