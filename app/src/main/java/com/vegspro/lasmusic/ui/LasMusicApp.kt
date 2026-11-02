@@ -19,46 +19,71 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.vegspro.lasmusic.player.PlayerViewModel
 import com.vegspro.lasmusic.player.SimilarTrackProvider
+
+// ---------- Data ----------
 
 data class AlbumCard(
     val id: String,
     val title: String,
     val subtitle: String,
-    val imageUrl: String
+    val color: Color,
+    val mediaItem: MediaItem
 )
 
-data class ArtistCard(
-    val id: String,
-    val name: String,
-    val imageUrl: String
-)
+private fun track(
+    id: String,
+    title: String,
+    artist: String,
+    uri: String
+): MediaItem = MediaItem.Builder()
+    .setMediaId(id)
+    .setUri(uri)
+    .setMediaMetadata(
+        MediaMetadata.Builder()
+            .setTitle(title)
+            .setArtist(artist)
+            .build()
+    )
+    .build()
 
 private val recommended = listOf(
-    AlbumCard("1", "ДИНАСТИЯ", "VILLIAN, madk1d • Красивое 3", "https://picsum.photos/seed/dynasty/300"),
-    AlbumCard("2", "DEMON'S SHOT", "Aiobahn +81, DEMONDICE • DE", "https://picsum.photos/seed/demon/300"),
-    AlbumCard("3", "Night Drive", "Synthwave Dreams", "https://picsum.photos/seed/night/300"),
-    AlbumCard("4", "Neon Dreams", "Retro Wave", "https://picsum.photos/seed/neon/300")
+    AlbumCard("1", "ДИНАСТИЯ", "VILLIAN, madk1d", Color(0xFF8B4513),
+        track("1", "ДИНАСТИЯ", "VILLIAN, madk1d", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3")),
+    AlbumCard("2", "DEMON'S SHOT", "Aiobahn +81, DEMONDICE", Color(0xFFB71C1C),
+        track("2", "DEMON'S SHOT", "Aiobahn +81", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3")),
+    AlbumCard("3", "Night Drive", "Synthwave Dreams", Color(0xFF1A237E),
+        track("3", "Night Drive", "Synthwave Dreams", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3")),
+    AlbumCard("4", "Neon Dreams", "Retro Wave", Color(0xFF4A148C),
+        track("4", "Neon Dreams", "Retro Wave", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3"))
 )
 
 private val newReleases = listOf(
-    AlbumCard("5", "да пошло всё", "dabbackwood, volhey", "https://picsum.photos/seed/snake/300"),
-    AlbumCard("6", "SHAPE OF YOU (HARDTEKK)", "ANDONIS, prodByLone", "https://picsum.photos/seed/pink/300"),
-    AlbumCard("7", "Midnight Jazz", "Cool Cats Trio", "https://picsum.photos/seed/jazz/300"),
-    AlbumCard("8", "Ocean Waves", "Ambient Collective", "https://picsum.photos/seed/ocean/300")
+    AlbumCard("5", "да пошло всё", "dabbackwood, volhey", Color(0xFF212121),
+        track("5", "да пошло всё", "dabbackwood, volhey", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3")),
+    AlbumCard("6", "SHAPE OF YOU (HARDTEKK)", "ANDONIS, prodByLone", Color(0xFFAD1457),
+        track("6", "SHAPE OF YOU (HARDTEKK)", "ANDONIS", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3")),
+    AlbumCard("7", "Midnight Jazz", "Cool Cats Trio", Color(0xFF004D40),
+        track("7", "Midnight Jazz", "Cool Cats Trio", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3")),
+    AlbumCard("8", "Ocean Waves", "Ambient Collective", Color(0xFF01579B),
+        track("8", "Ocean Waves", "Ambient Collective", "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3"))
 )
 
 private val artists = listOf(
-    ArtistCard("a1", "The Weeknd", "https://picsum.photos/seed/weeknd/200"),
-    ArtistCard("a2", "Playboi Carti", "https://picsum.photos/seed/carti/200"),
-    ArtistCard("a3", "Travis Scott", "https://picsum.photos/seed/travis/200"),
-    ArtistCard("a4", "Billie Eilish", "https://picsum.photos/seed/billie/200")
+    "The Weeknd" to Color(0xFF6A1B9A),
+    "Playboi Carti" to Color(0xFFC62828),
+    "Travis Scott" to Color(0xFF283593),
+    "Billie Eilish" to Color(0xFF2E7D32)
 )
 
 private val libraryItems = listOf(
@@ -69,6 +94,8 @@ private val libraryItems = listOf(
     "Альбомы" to Icons.Default.Album,
     "Исполнители" to Icons.Default.Person
 )
+
+// ---------- Main ----------
 
 @Composable
 fun LasMusicApp(playerViewModel: PlayerViewModel) {
@@ -84,9 +111,14 @@ fun LasMusicApp(playerViewModel: PlayerViewModel) {
                     listOf(Color(0xFF0A0A0A), Color(0xFF121212), Color(0xFF0D0D12))
                 )
             )
+            .statusBarsPadding()   // fix status bar overlap
     ) {
         when (selectedTab) {
-            0 -> HomeScreen(onPlayAlbum = { playerViewModel.togglePlayPause() })
+            0 -> HomeScreen(
+                onPlayAlbum = { album ->
+                    playerViewModel.playTrack(album.mediaItem)
+                }
+            )
             1 -> MixScreen()
             2 -> LibraryScreen()
             3 -> SearchScreen()
@@ -109,13 +141,17 @@ fun LasMusicApp(playerViewModel: PlayerViewModel) {
         GlassBottomBar(
             selectedIndex = selectedTab,
             onSelect = { selectedTab = it },
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
         )
     }
 }
 
+// ---------- Screens ----------
+
 @Composable
-fun HomeScreen(onPlayAlbum: () -> Unit) {
+fun HomeScreen(onPlayAlbum: (AlbumCard) -> Unit) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -126,20 +162,36 @@ fun HomeScreen(onPlayAlbum: () -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = true, onClick = {}, label = { Text("Все") })
-                    FilterChip(selected = false, onClick = {}, label = { Text("Настроение") })
+                    FilterChip(
+                        selected = true,
+                        onClick = {},
+                        label = { Text("Все") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFBB86FC).copy(0.3f),
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                    FilterChip(
+                        selected = false,
+                        onClick = {},
+                        label = { Text("Настроение") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color.Transparent,
+                            labelColor = Color.White.copy(0.8f)
+                        )
+                    )
                 }
                 Row {
                     IconButton(onClick = {}) {
-                        Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
+                        Icon(Icons.Default.Add, null, tint = Color.White)
                     }
                     IconButton(onClick = {}) {
-                        Icon(Icons.Default.Settings, contentDescription = null, tint = Color.White)
+                        Icon(Icons.Default.Settings, null, tint = Color.White)
                     }
                 }
             }
@@ -152,7 +204,7 @@ fun HomeScreen(onPlayAlbum: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 items(recommended) { album ->
-                    AlbumCardView(album = album, onClick = onPlayAlbum)
+                    AlbumCardView(album = album, onClick = { onPlayAlbum(album) })
                 }
             }
             Spacer(Modifier.height(28.dp))
@@ -165,7 +217,7 @@ fun HomeScreen(onPlayAlbum: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 items(newReleases) { album ->
-                    AlbumCardView(album = album, onClick = onPlayAlbum)
+                    AlbumCardView(album = album, onClick = { onPlayAlbum(album) })
                 }
             }
             Spacer(Modifier.height(28.dp))
@@ -177,8 +229,28 @@ fun HomeScreen(onPlayAlbum: () -> Unit) {
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(artists) { artist ->
-                    ArtistCardView(artist)
+                items(artists) { (name, color) ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.width(90.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(80.dp)
+                                .clip(CircleShape)
+                                .background(color),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                name.take(1),
+                                color = Color.White,
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(name, color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
             Spacer(Modifier.height(28.dp))
@@ -190,8 +262,8 @@ fun HomeScreen(onPlayAlbum: () -> Unit) {
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                items(recommended.shuffled()) { album ->
-                    AlbumCardView(album = album, onClick = onPlayAlbum)
+                items(recommended.shuffled() + newReleases.shuffled()) { album ->
+                    AlbumCardView(album = album, onClick = { onPlayAlbum(album) })
                 }
             }
         }
@@ -200,9 +272,9 @@ fun HomeScreen(onPlayAlbum: () -> Unit) {
 
 @Composable
 fun MixScreen() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFFBB86FC), modifier = Modifier.size(64.dp))
+            Icon(Icons.Default.AutoAwesome, null, tint = Color(0xFFBB86FC), modifier = Modifier.size(64.dp))
             Spacer(Modifier.height(16.dp))
             Text("Микс", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Text("Персональные подборки скоро появятся", color = Color.White.copy(0.6f))
@@ -218,7 +290,7 @@ fun LibraryScreen() {
             .padding(bottom = 160.dp)
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp)
+        contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)
     ) {
         item {
             Text(
@@ -238,7 +310,7 @@ fun LibraryScreen() {
                     .padding(vertical = 14.dp, horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(icon, contentDescription = null, tint = Color(0xFFBB86FC), modifier = Modifier.size(28.dp))
+                Icon(icon, null, tint = Color(0xFFBB86FC), modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(16.dp))
                 Text(title, color = Color.White, fontSize = 17.sp)
             }
@@ -290,6 +362,8 @@ fun SearchScreen() {
     }
 }
 
+// ---------- Components ----------
+
 @Composable
 fun SectionHeader(title: String, showMore: Boolean = false) {
     Row(
@@ -314,15 +388,21 @@ fun AlbumCardView(album: AlbumCard, onClick: () -> Unit) {
             .width(150.dp)
             .clickable(onClick = onClick)
     ) {
-        AsyncImage(
-            model = album.imageUrl,
-            contentDescription = album.title,
-            contentScale = ContentScale.Crop,
+        // Colored placeholder instead of broken network images
+        Box(
             modifier = Modifier
                 .size(150.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(0.08f))
-        )
+                .background(album.color),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.MusicNote,
+                contentDescription = null,
+                tint = Color.White.copy(0.7f),
+                modifier = Modifier.size(48.dp)
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Text(
             album.title,
@@ -336,32 +416,6 @@ fun AlbumCardView(album: AlbumCard, onClick: () -> Unit) {
             album.subtitle,
             color = Color.White.copy(0.55f),
             fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-fun ArtistCardView(artist: ArtistCard) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(90.dp)
-    ) {
-        AsyncImage(
-            model = artist.imageUrl,
-            contentDescription = artist.name,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .size(80.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(0.08f))
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            artist.name,
-            color = Color.White,
-            fontSize = 13.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
