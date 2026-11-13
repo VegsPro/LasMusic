@@ -8,26 +8,29 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import com.vegspro.lasmusic.youtube.YouTubeMusicRepository
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val musicPlayer = MusicPlayer(application, viewModelScope)
-    private val ytm = YouTubeMusicRepository(application)
-    private val prefs = application.getSharedPreferences("lasmusic_likes", Context.MODE_PRIVATE)
+    private val tag = "PlayerVM"
+    private val app = application
 
-    val isPlaying = musicPlayer.isPlaying
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-    val currentItem = musicPlayer.currentItem
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-    val queue = musicPlayer.queue
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private var musicPlayer: MusicPlayer? = null
+    private val ytm by lazy { YouTubeMusicRepository(app) }
+    private val prefs by lazy { app.getSharedPreferences("lasmusic_likes", Context.MODE_PRIVATE) }
+
+    private val _isPlaying = MutableStateFlow(false)
+    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+
+    private val _currentItem = MutableStateFlow<MediaItem?>(null)
+    val currentItem: StateFlow<MediaItem?> = _currentItem.asStateFlow()
+
+    private val _queue = MutableStateFlow<List<MediaItem>>(emptyList())
+    val queue: StateFlow<List<MediaItem>> = _queue.asStateFlow()
 
     private val _searchResults = MutableStateFlow<List<YouTubeMusicRepository.Track>>(emptyList())
     val searchResults: StateFlow<List<YouTubeMusicRepository.Track>> = _searchResults.asStateFlow()
@@ -51,21 +54,59 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
     init {
-        musicPlayer.setInfiniteMode(true)
-        loadLikesFromDisk()
-        loadHome()
+        Log.i(tag, "ViewModel init")
+        try {
+            loadLikesFromDisk()
+        } catch (e: Exception) {
+            Log.e(tag, "loadLikes", e)
+        }
+        // Defer network + player to after first frame
+        viewModelScope.launch {
+            try {
+                ensurePlayer()
+            } catch (e: Exception) {
+                Log.e(tag, "player init", e)
+            }
+            try {
+                loadHome()
+            } catch (e: Exception) {
+                Log.e(tag, "loadHome", e)
+            }
+        }
+    }
+
+    private fun ensurePlayer(): MusicPlayer {
+        val existing = musicPlayer
+        if (existing != null) return existing
+        synchronized(this) {
+            val again = musicPlayer
+            if (again != null) return again
+            Log.i(tag, "Creating MusicPlayer")
+            val p = MusicPlayer(app, viewModelScope)
+            // Mirror state into VM flows
+            viewModelScope.launch {
+                p.isPlaying.collect { _isPlaying.value = it }
+            }
+            viewModelScope.launch {
+                p.currentItem.collect { _currentItem.value = it }
+            }
+            viewModelScope.launch {
+                p.queue.collect { _queue.value = it }
+            }
+            p.setInfiniteMode(true)
+            musicPlayer = p
+            return p
+        }
     }
 
     fun loadHome() {
         viewModelScope.launch {
             _isLoadingHome.value = true
             try {
-                val home = ytm.getHome()
-                val charts = ytm.getCharts()
-                _homeTracks.value = home
-                _chartTracks.value = charts
+                _homeTracks.value = ytm.getHome()
+                _chartTracks.value = ytm.getCharts()
             } catch (e: Exception) {
-                Log.e("PlayerVM", "loadHome", e)
+                Log.e(tag, "loadHome", e)
             } finally {
                 _isLoadingHome.value = false
             }
@@ -95,13 +136,15 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val item = ytm.resolvePlayable(track)
                 if (item != null) {
-                    musicPlayer.setQueue(listOf(item), 0)
-                    musicPlayer.play()
+                    val p = ensurePlayer()
+                    p.setQueue(listOf(item), 0)
+                    p.play()
                     _statusMessage.value = null
                 } else {
                     _statusMessage.value = "Поток недоступен. Попробуй другой трек."
                 }
             } catch (e: Exception) {
+                Log.e(tag, "playYtmTrack", e)
                 _statusMessage.value = "Ошибка воспроизведения"
             }
         }
@@ -115,54 +158,52 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         saveLikesToDisk(current)
     }
 
-    fun isLiked(videoId: String): Boolean =
-        _likedTracks.value.any { it.videoId == videoId }
+    fun isLiked(videoId: String): Boolean = _likedTracks.value.any { it.videoId == videoId }
 
     private fun loadLikesFromDisk() {
-        try {
-            val raw = prefs.getString("likes_json", "[]") ?: "[]"
-            val arr = JSONArray(raw)
-            val list = mutableListOf<YouTubeMusicRepository.Track>()
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                list.add(
-                    YouTubeMusicRepository.Track(
-                        videoId = o.getString("videoId"),
-                        title = o.optString("title"),
-                        artist = o.optString("artist"),
-                        thumbnailUrl = o.optString("thumb").takeIf { it.isNotBlank() }
-                    )
+        val raw = prefs.getString("likes_json", "[]") ?: "[]"
+        val arr = JSONArray(raw)
+        val list = mutableListOf<YouTubeMusicRepository.Track>()
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            list.add(
+                YouTubeMusicRepository.Track(
+                    videoId = o.getString("videoId"),
+                    title = o.optString("title"),
+                    artist = o.optString("artist"),
+                    thumbnailUrl = o.optString("thumb").takeIf { it.isNotBlank() }
                 )
-            }
-            _likedTracks.value = list
-        } catch (_: Exception) {}
+            )
+        }
+        _likedTracks.value = list
     }
 
     private fun saveLikesToDisk(list: List<YouTubeMusicRepository.Track>) {
-        try {
-            val arr = JSONArray()
-            list.forEach { t ->
-                arr.put(JSONObject().apply {
-                    put("videoId", t.videoId)
-                    put("title", t.title)
-                    put("artist", t.artist)
-                    put("thumb", t.thumbnailUrl ?: "")
-                })
-            }
-            prefs.edit().putString("likes_json", arr.toString()).apply()
-        } catch (_: Exception) {}
+        val arr = JSONArray()
+        list.forEach { t ->
+            arr.put(JSONObject().apply {
+                put("videoId", t.videoId)
+                put("title", t.title)
+                put("artist", t.artist)
+                put("thumb", t.thumbnailUrl ?: "")
+            })
+        }
+        prefs.edit().putString("likes_json", arr.toString()).apply()
     }
 
-    fun togglePlayPause() = try { musicPlayer.togglePlayPause() } catch (_: Exception) {}
-    fun next() = try { musicPlayer.seekToNext() } catch (_: Exception) {}
-    fun previous() = try { musicPlayer.seekToPrevious() } catch (_: Exception) {}
+    fun togglePlayPause() = try { ensurePlayer().togglePlayPause() } catch (e: Exception) { Log.e(tag, "toggle", e) }
+    fun next() = try { ensurePlayer().seekToNext() } catch (e: Exception) { Log.e(tag, "next", e) }
+    fun previous() = try { ensurePlayer().seekToPrevious() } catch (e: Exception) { Log.e(tag, "prev", e) }
 
     fun playQueue(items: List<MediaItem>, startIndex: Int = 0) {
         if (items.isEmpty()) return
         try {
-            musicPlayer.setQueue(items, startIndex)
-            musicPlayer.play()
-        } catch (_: Exception) {}
+            val p = ensurePlayer()
+            p.setQueue(items, startIndex)
+            p.play()
+        } catch (e: Exception) {
+            Log.e(tag, "playQueue", e)
+        }
     }
 
     fun playTrack(item: MediaItem) {
@@ -171,7 +212,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     override fun onCleared() {
-        try { musicPlayer.release() } catch (_: Exception) {}
+        try { musicPlayer?.release() } catch (_: Exception) {}
         try { ytm.close() } catch (_: Exception) {}
         super.onCleared()
     }
