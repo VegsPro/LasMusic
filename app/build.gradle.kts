@@ -9,24 +9,26 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.vegspro.lasmusic"
+        // New id so install never conflicts with old broken installs
+        applicationId = "com.vegspro.lasmusic3"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.2.2"
-
+        versionCode = 10
+        versionName = "1.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        vectorDrawables {
-            useSupportLibrary = true
-        }
+        vectorDrawables { useSupportLibrary = true }
     }
 
     signingConfigs {
         create("release") {
-            storeFile = file("../lasmusic-release.keystore")
+            // rootProject.file is reliable from app module
+            storeFile = rootProject.file("lasmusic-release.keystore")
             storePassword = "LasMusic2026!"
             keyAlias = "lasmusic"
             keyPassword = "LasMusic2026!"
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 
@@ -41,8 +43,8 @@ android {
             )
         }
         debug {
-            // Same key so updates work when switching debug/release
             signingConfig = signingConfigs.getByName("release")
+            applicationIdSuffix = ""
         }
     }
 
@@ -50,12 +52,8 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-    buildFeatures {
-        compose = true
-    }
+    kotlinOptions { jvmTarget = "17" }
+    buildFeatures { compose = true }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -87,7 +85,6 @@ dependencies {
 
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("androidx.webkit:webkit:1.12.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
