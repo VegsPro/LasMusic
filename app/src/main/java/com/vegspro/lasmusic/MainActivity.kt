@@ -19,10 +19,7 @@ class MainActivity : ComponentActivity() {
         Log.i("MainActivity", "onCreate")
         setContent {
             LasMusicTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF121212)
-                ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF121212)) {
                     val vm: PlayerViewModel = viewModel()
                     LasMusicApp(playerViewModel = vm)
                 }

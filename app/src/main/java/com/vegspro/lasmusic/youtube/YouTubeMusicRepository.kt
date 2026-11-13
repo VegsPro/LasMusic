@@ -7,7 +7,7 @@ import androidx.media3.common.MediaMetadata
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-class YouTubeMusicRepository(private val context: Context) {
+class YouTubeMusicRepository(@Suppress("UNUSED_PARAMETER") context: Context) {
 
     private val tag = "YTMRepo"
     private val client = InnerTubeClient()
@@ -44,7 +44,7 @@ class YouTubeMusicRepository(private val context: Context) {
                 Track(it.videoId, it.title, it.artist, it.thumbnail)
             }
         } catch (e: Exception) {
-            Log.e(tag, "Search error: ${e.message}", e)
+            Log.e(tag, "Search error", e)
             emptyList()
         }
     }
@@ -69,14 +69,20 @@ class YouTubeMusicRepository(private val context: Context) {
 
     suspend fun resolvePlayable(track: Track): MediaItem? = withContext(Dispatchers.IO) {
         try {
-            val url = client.getDirectAudioUrl(track.videoId)
-            if (url != null) {
-                Log.i(tag, "Got direct stream for ${track.videoId}")
-                track.toMediaItem(url)
-            } else {
-                Log.w(tag, "No direct stream for ${track.videoId}")
-                null
+            // 1) Piped / public stream APIs (most reliable for playback)
+            val piped = StreamResolver.resolve(track.videoId)
+            if (piped != null) {
+                Log.i(tag, "Stream via Piped for ${track.videoId}")
+                return@withContext track.toMediaItem(piped)
             }
+            // 2) Direct InnerTube (rare plain URLs)
+            val direct = client.getDirectAudioUrl(track.videoId)
+            if (direct != null) {
+                Log.i(tag, "Stream via InnerTube for ${track.videoId}")
+                return@withContext track.toMediaItem(direct)
+            }
+            Log.w(tag, "No stream for ${track.videoId}")
+            null
         } catch (e: Exception) {
             Log.e(tag, "Resolve failed", e)
             null
