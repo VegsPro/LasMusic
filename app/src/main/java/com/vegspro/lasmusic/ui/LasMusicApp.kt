@@ -117,7 +117,7 @@ fun LasMusicApp(playerViewModel: PlayerViewModel) {
                     listOf(Color(0xFF0A0A0A), Color(0xFF121212), Color(0xFF0D0D12))
                 )
             )
-            .statusBarsPadding()
+            .padding(top = 28.dp)
     ) {
         when (selectedTab) {
             0 -> HomeScreen(playerViewModel)
@@ -145,7 +145,7 @@ fun LasMusicApp(playerViewModel: PlayerViewModel) {
             onSelect = { selectedTab = it },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
+                .padding(bottom = 8.dp)
         )
     }
 }
@@ -277,7 +277,7 @@ fun YtmTrackCard(
 
 @Composable
 fun MixScreen() {
-    Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().padding(top = 28.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Default.AutoAwesome, null, tint = Color(0xFFBB86FC), modifier = Modifier.size(64.dp))
             Spacer(Modifier.height(16.dp))
