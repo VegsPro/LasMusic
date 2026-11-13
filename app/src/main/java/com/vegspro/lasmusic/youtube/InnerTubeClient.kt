@@ -3,7 +3,6 @@ package com.vegspro.lasmusic.youtube
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -12,84 +11,93 @@ import java.util.zip.GZIPInputStream
 
 /**
  * Lightweight InnerTube client for YouTube Music.
- * Implements anonymous search + basic player endpoint.
- * Login / personalized features can be layered on top later.
+ * Tries WEB_REMIX and ANDROID clients for better stream availability.
  */
 class InnerTubeClient {
 
     private val tag = "InnerTubeClient"
     private val base = "https://music.youtube.com/youtubei/v1"
-    private val apiKey = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30" // WEB client key (public)
+    // Public client keys used by official clients
+    private val webKey = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
+    private val androidKey = "AIzaSyAOghZGza2MQSZkY_zfZ370N-PUdXEo8AI"
 
     @Volatile
     private var visitorData: String? = null
 
-    private fun defaultContext(): JSONObject {
-        return JSONObject().apply {
-            put("client", JSONObject().apply {
-                put("clientName", "WEB_REMIX")
-                put("clientVersion", "1.20241030.01.00")
-                put("hl", "ru")
-                put("gl", "RU")
-                visitorData?.let { put("visitorData", it) }
-            })
-            put("user", JSONObject().apply {
-                put("lockedSafetyMode", false)
-            })
-        }
+    private fun webContext(): JSONObject = JSONObject().apply {
+        put("client", JSONObject().apply {
+            put("clientName", "WEB_REMIX")
+            put("clientVersion", "1.20241030.01.00")
+            put("hl", "ru")
+            put("gl", "RU")
+            visitorData?.let { put("visitorData", it) }
+        })
+        put("user", JSONObject().put("lockedSafetyMode", false))
     }
 
-    private fun post(endpoint: String, body: JSONObject): JSONObject? {
+    private fun androidContext(): JSONObject = JSONObject().apply {
+        put("client", JSONObject().apply {
+            put("clientName", "ANDROID_MUSIC")
+            put("clientVersion", "7.27.52")
+            put("androidSdkVersion", 34)
+            put("hl", "ru")
+            put("gl", "RU")
+            visitorData?.let { put("visitorData", it) }
+        })
+        put("user", JSONObject().put("lockedSafetyMode", false))
+    }
+
+    private fun post(endpoint: String, body: JSONObject, key: String, origin: String): JSONObject? {
         return try {
-            val url = URL("$base/$endpoint?prettyPrint=false&key=$apiKey")
+            val url = URL("$base/$endpoint?prettyPrint=false&key=$key")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
-                setRequestProperty("Origin", "https://music.youtube.com")
-                setRequestProperty("Referer", "https://music.youtube.com/")
+                setRequestProperty("User-Agent",
+                    if (key == androidKey)
+                        "com.google.android.apps.youtube.music/7.27.52 (Linux; U; Android 14; rv:34) gzip"
+                    else
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+                )
+                setRequestProperty("Origin", origin)
+                setRequestProperty("Referer", "$origin/")
                 setRequestProperty("Accept-Encoding", "gzip")
-                setRequestProperty("X-Goog-Visitor-Id", visitorData ?: "")
+                visitorData?.let { setRequestProperty("X-Goog-Visitor-Id", it) }
                 doOutput = true
                 connectTimeout = 15000
                 readTimeout = 20000
             }
             conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
-            val stream = if (code in 200..299) {
-                if (conn.contentEncoding == "gzip") GZIPInputStream(conn.inputStream) else conn.inputStream
-            } else {
-                if (conn.contentEncoding == "gzip") GZIPInputStream(conn.errorStream) else conn.errorStream
-            }
+            val raw = if (code in 200..299) conn.inputStream else conn.errorStream
+            val stream = if (conn.contentEncoding == "gzip") GZIPInputStream(raw) else raw
             val text = stream.bufferedReader().use { it.readText() }
             if (code !in 200..299) {
-                Log.w(tag, "HTTP $code for $endpoint: ${text.take(300)}")
+                Log.w(tag, "HTTP $code $endpoint: ${text.take(200)}")
                 return null
             }
             JSONObject(text)
         } catch (e: Exception) {
-            Log.e(tag, "POST $endpoint failed: ${e.message}", e)
+            Log.e(tag, "POST $endpoint: ${e.message}")
             null
         }
     }
 
     suspend fun ensureVisitorData() = withContext(Dispatchers.IO) {
         if (visitorData != null) return@withContext
-        val body = JSONObject().put("context", defaultContext())
-        val resp = post("visitor_id", body) // may not exist; fallback
-        // Alternative: get from browse
-        val browseBody = JSONObject().apply {
-            put("context", defaultContext())
+        val body = JSONObject().apply {
+            put("context", webContext())
             put("browseId", "FEmusic_home")
         }
-        val browse = post("browse", browseBody)
-        // Extract visitorData from responseContext if present
-        browse?.optJSONObject("responseContext")?.optString("visitorData")?.takeIf { it.isNotBlank() }?.let {
-            visitorData = it
-            Log.i(tag, "Got visitorData")
-        }
+        val browse = post("browse", body, webKey, "https://music.youtube.com")
+        browse?.optJSONObject("responseContext")?.optString("visitorData")
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+                visitorData = it
+                Log.i(tag, "visitorData ok")
+            }
         if (visitorData == null) {
-            visitorData = "Cgt" + UUID.randomUUID().toString().replace("-", "").take(20)
+            visitorData = "Cgt" + UUID.randomUUID().toString().replace("-", "").take(22)
         }
     }
 
@@ -103,11 +111,12 @@ class InnerTubeClient {
     suspend fun search(query: String): List<SearchResult> = withContext(Dispatchers.IO) {
         ensureVisitorData()
         val body = JSONObject().apply {
-            put("context", defaultContext())
+            put("context", webContext())
             put("query", query)
-            put("params", "EgWKAQIIAWoKEAMQBBAJEAoQBQ%3D%3D") // songs filter
+            put("params", "EgWKAQIIAWoKEAMQBBAJEAoQBQ%3D%3D") // filter: songs
         }
-        val resp = post("search", body) ?: return@withContext emptyList()
+        val resp = post("search", body, webKey, "https://music.youtube.com")
+            ?: return@withContext emptyList()
         parseSearchResults(resp)
     }
 
@@ -126,14 +135,11 @@ class InnerTubeClient {
                 ?: return emptyList()
 
             for (i in 0 until contents.length()) {
-                val section = contents.optJSONObject(i) ?: continue
-                val musicShelf = section.optJSONObject("musicShelfRenderer") ?: continue
+                val musicShelf = contents.optJSONObject(i)?.optJSONObject("musicShelfRenderer") ?: continue
                 val items = musicShelf.optJSONArray("contents") ?: continue
                 for (j in 0 until items.length()) {
                     val item = items.optJSONObject(j)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
-                    val videoId = item
-                        .optJSONObject("playlistItemData")
-                        ?.optString("videoId")
+                    val videoId = item.optJSONObject("playlistItemData")?.optString("videoId")
                         ?.takeIf { it.isNotBlank() }
                         ?: item.optJSONObject("overlay")
                             ?.optJSONObject("musicItemThumbnailOverlayRenderer")
@@ -151,69 +157,87 @@ class InnerTubeClient {
                         ?.optJSONArray("runs")
                         ?.optJSONObject(0)
                         ?.optString("text") ?: "Unknown"
-
                     val artist = flex?.optJSONObject(1)
                         ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
                         ?.optJSONObject("text")
                         ?.optJSONArray("runs")
                         ?.optJSONObject(0)
                         ?.optString("text") ?: ""
-
                     val thumb = item.optJSONObject("thumbnail")
                         ?.optJSONObject("musicThumbnailRenderer")
                         ?.optJSONObject("thumbnail")
                         ?.optJSONArray("thumbnails")
-                        ?.let { arr ->
-                            arr.optJSONObject(arr.length() - 1)?.optString("url")
-                        }
+                        ?.let { arr -> arr.optJSONObject(arr.length() - 1)?.optString("url") }
 
                     out.add(SearchResult(videoId, title, artist, thumb))
                 }
             }
         } catch (e: Exception) {
-            Log.e(tag, "Parse search failed", e)
+            Log.e(tag, "parse search", e)
         }
         return out
     }
 
     /**
-     * Get player response. Stream URLs may be ciphered — for full playback
-     * a signature decipher step is still required (InnerTubeX extractor / yt-dlp style).
-     * Returns adaptive formats when available (some are direct).
-     */
-    suspend fun getPlayer(videoId: String): JSONObject? = withContext(Dispatchers.IO) {
-        ensureVisitorData()
-        val body = JSONObject().apply {
-            put("context", defaultContext())
-            put("videoId", videoId)
-            put("contentCheckOk", true)
-            put("racyCheckOk", true)
-        }
-        post("player", body)
-    }
-
-    /**
-     * Try to pick a direct (non-ciphered) audio URL from player response.
+     * Try ANDROID_MUSIC then WEB for a direct audio URL (no cipher).
      */
     suspend fun getDirectAudioUrl(videoId: String): String? = withContext(Dispatchers.IO) {
-        val player = getPlayer(videoId) ?: return@withContext null
-        val formats = player.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats")
-            ?: player.optJSONObject("streamingData")?.optJSONArray("formats")
-            ?: return@withContext null
+        ensureVisitorData()
+        // Prefer Android Music client — more often returns plain URLs
+        extractUrl(
+            post(
+                "player",
+                JSONObject().apply {
+                    put("context", androidContext())
+                    put("videoId", videoId)
+                    put("contentCheckOk", true)
+                    put("racyCheckOk", true)
+                },
+                androidKey,
+                "https://music.youtube.com"
+            )
+        ) ?: extractUrl(
+            post(
+                "player",
+                JSONObject().apply {
+                    put("context", webContext())
+                    put("videoId", videoId)
+                    put("contentCheckOk", true)
+                    put("racyCheckOk", true)
+                },
+                webKey,
+                "https://music.youtube.com"
+            )
+        )
+    }
 
+    private fun extractUrl(player: JSONObject?): String? {
+        if (player == null) return null
+        val status = player.optJSONObject("playabilityStatus")?.optString("status")
+        if (status != null && status != "OK") {
+            Log.w(tag, "playability: $status")
+            return null
+        }
+        val streaming = player.optJSONObject("streamingData") ?: return null
+        val arrays = listOfNotNull(
+            streaming.optJSONArray("adaptiveFormats"),
+            streaming.optJSONArray("formats")
+        )
         var bestUrl: String? = null
-        var bestBitrate = -1
-        for (i in 0 until formats.length()) {
-            val f = formats.optJSONObject(i) ?: continue
-            val mime = f.optString("mimeType")
-            if (!mime.startsWith("audio/")) continue
-            val url = f.optString("url").takeIf { it.isNotBlank() } ?: continue // skip ciphered
-            val br = f.optInt("bitrate", 0)
-            if (br > bestBitrate) {
-                bestBitrate = br
-                bestUrl = url
+        var bestBr = -1
+        for (arr in arrays) {
+            for (i in 0 until arr.length()) {
+                val f = arr.optJSONObject(i) ?: continue
+                val mime = f.optString("mimeType")
+                if (!mime.contains("audio")) continue
+                val url = f.optString("url").takeIf { it.isNotBlank() } ?: continue
+                val br = f.optInt("bitrate", 0)
+                if (br > bestBr) {
+                    bestBr = br
+                    bestUrl = url
+                }
             }
         }
-        bestUrl
+        return bestUrl
     }
 }

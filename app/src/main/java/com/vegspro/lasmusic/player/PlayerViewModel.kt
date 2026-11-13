@@ -15,7 +15,13 @@ import kotlinx.coroutines.launch
 
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val musicPlayer = MusicPlayer(application, viewModelScope)
+    private val musicPlayer: MusicPlayer = try {
+        MusicPlayer(application, viewModelScope)
+    } catch (e: Exception) {
+        Log.e("PlayerVM", "MusicPlayer init failed", e)
+        throw e
+    }
+
     private val ytm = YouTubeMusicRepository(application)
 
     val isPlaying = musicPlayer.isPlaying
@@ -37,7 +43,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
     init {
-        musicPlayer.setInfiniteMode(true)
+        try {
+            musicPlayer.setInfiniteMode(true)
+        } catch (e: Exception) {
+            Log.e("PlayerVM", "init infinite mode", e)
+        }
     }
 
     fun search(query: String) {
@@ -50,7 +60,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 _statusMessage.value = if (results.isEmpty()) "Ничего не найдено" else "Найдено: ${results.size}"
             } catch (e: Exception) {
                 Log.e("PlayerVM", "Search failed", e)
-                _statusMessage.value = "Ошибка поиска"
+                _statusMessage.value = "Ошибка поиска: ${e.message?.take(40)}"
                 _searchResults.value = emptyList()
             } finally {
                 _isSearching.value = false
@@ -61,37 +71,49 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun playYtmTrack(track: YouTubeMusicRepository.Track) {
         viewModelScope.launch {
             _statusMessage.value = "Загрузка потока…"
-            val item = ytm.resolvePlayable(track)
-            if (item != null) {
-                musicPlayer.setQueue(listOf(item), 0)
-                musicPlayer.play()
-                _statusMessage.value = null
-                // Try to append related / more of same search later
-            } else {
-                _statusMessage.value = "Не удалось получить поток (нужен cipher). Попробуйте другой трек."
+            try {
+                val item = ytm.resolvePlayable(track)
+                if (item != null) {
+                    musicPlayer.setQueue(listOf(item), 0)
+                    musicPlayer.play()
+                    _statusMessage.value = null
+                } else {
+                    _statusMessage.value = "Поток недоступен (cipher). Попробуй другой трек."
+                }
+            } catch (e: Exception) {
+                Log.e("PlayerVM", "playYtmTrack", e)
+                _statusMessage.value = "Ошибка: ${e.message?.take(40)}"
             }
         }
     }
 
-    fun togglePlayPause() = musicPlayer.togglePlayPause()
-    fun next() = musicPlayer.seekToNext()
-    fun previous() = musicPlayer.seekToPrevious()
-    fun setInfiniteMode(enabled: Boolean) = musicPlayer.setInfiniteMode(enabled)
+    fun togglePlayPause() = try { musicPlayer.togglePlayPause() } catch (_: Exception) {}
+    fun next() = try { musicPlayer.seekToNext() } catch (_: Exception) {}
+    fun previous() = try { musicPlayer.seekToPrevious() } catch (_: Exception) {}
+    fun setInfiniteMode(enabled: Boolean) = try { musicPlayer.setInfiniteMode(enabled) } catch (_: Exception) {}
 
     fun playQueue(items: List<MediaItem>, startIndex: Int = 0) {
         if (items.isEmpty()) return
-        musicPlayer.setQueue(items, startIndex)
-        musicPlayer.play()
+        try {
+            musicPlayer.setQueue(items, startIndex)
+            musicPlayer.play()
+        } catch (e: Exception) {
+            Log.e("PlayerVM", "playQueue", e)
+        }
     }
 
     fun playTrack(item: MediaItem) {
-        val related = SimilarTrackProvider.getSimilar(item, limit = 6)
+        val related = try {
+            SimilarTrackProvider.getSimilar(item, limit = 6)
+        } catch (_: Exception) {
+            emptyList()
+        }
         playQueue(listOf(item) + related)
     }
 
     override fun onCleared() {
-        musicPlayer.release()
-        ytm.close()
+        try { musicPlayer.release() } catch (_: Exception) {}
+        try { ytm.close() } catch (_: Exception) {}
         super.onCleared()
     }
 }
