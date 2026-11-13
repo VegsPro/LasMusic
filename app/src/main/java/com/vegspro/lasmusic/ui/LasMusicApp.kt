@@ -123,7 +123,7 @@ fun LasMusicApp(playerViewModel: PlayerViewModel) {
             0 -> HomeScreen(onPlayAlbum = { album -> playerViewModel.playTrack(album.mediaItem) })
             1 -> MixScreen()
             2 -> LibraryScreen()
-            3 -> SearchScreen()
+            3 -> SearchScreen(playerViewModel)
         }
 
         if (current != null) {
@@ -288,14 +288,35 @@ fun LibraryScreen() {
     }
 }
 
+
 @Composable
-fun SearchScreen() {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp).padding(bottom = 160.dp)) {
+fun SearchScreen(playerViewModel: PlayerViewModel) {
+    var query by remember { mutableStateOf("") }
+    val results by playerViewModel.searchResults.collectAsState()
+    val isSearching by playerViewModel.isSearching.collectAsState()
+    val status by playerViewModel.statusMessage.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .padding(bottom = 160.dp)
+    ) {
         OutlinedTextField(
-            value = "", onValueChange = {},
+            value = query,
+            onValueChange = { query = it },
             placeholder = { Text("Треки, альбомы, исполнители...", color = Color.White.copy(0.5f)) },
             leadingIcon = { Icon(Icons.Default.Search, null, tint = Color.White.copy(0.7f)) },
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)),
+            trailingIcon = {
+                if (query.isNotBlank()) {
+                    IconButton(onClick = { playerViewModel.search(query) }) {
+                        Icon(Icons.Default.PlayArrow, "Искать", tint = Color(0xFFBB86FC))
+                    }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(28.dp)),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Color.Transparent,
                 unfocusedBorderColor = Color.Transparent,
@@ -307,15 +328,87 @@ fun SearchScreen() {
             ),
             singleLine = true
         )
-        Spacer(Modifier.height(32.dp))
-        Text("Популярные запросы", color = Color.White.copy(0.7f), fontSize = 14.sp)
-        Spacer(Modifier.height(12.dp))
-        listOf("The Weeknd", "Hardtekk", "Phonk", "Lo-fi", "Synthwave").forEach { query ->
-            Text(query, color = Color.White, fontSize = 16.sp,
-                modifier = Modifier.fillMaxWidth().clickable { }.padding(vertical = 12.dp))
+
+        if (isSearching) {
+            Spacer(Modifier.height(24.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                color = Color(0xFFBB86FC)
+            )
+        }
+
+        status?.let {
+            Spacer(Modifier.height(12.dp))
+            Text(it, color = Color.White.copy(0.7f), fontSize = 13.sp)
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        if (results.isEmpty() && !isSearching) {
+            Text("Популярные запросы", color = Color.White.copy(0.7f), fontSize = 14.sp)
+            Spacer(Modifier.height(12.dp))
+            listOf("The Weeknd", "Phonk", "Lo-fi", "Billie Eilish", "Hardtekk").forEach { q ->
+                Text(
+                    q,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            query = q
+                            playerViewModel.search(q)
+                        }
+                        .padding(vertical = 12.dp)
+                )
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(results, key = { it.videoId }) { track ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { playerViewModel.playYtmTrack(track) }
+                            .padding(vertical = 10.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AsyncImage(
+                            model = track.thumbnailUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(0.08f))
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                track.title,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                track.artist,
+                                color = Color.White.copy(0.6f),
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Icon(Icons.Default.PlayArrow, null, tint = Color(0xFFBB86FC))
+                    }
+                }
+            }
         }
     }
 }
+
 
 @Composable
 fun SectionHeader(title: String, showMore: Boolean = false) {
