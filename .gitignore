@@ -7,9 +7,9 @@
 /captures
 .externalNativeBuild
 .cxx
-*.keystore
 config.env
-keystore.properties
 *.apk
 *.aab
 app/release/
+*.keystore
+!lasmusic-release.keystore

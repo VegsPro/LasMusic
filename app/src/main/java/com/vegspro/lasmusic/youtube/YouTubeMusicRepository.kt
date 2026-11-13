@@ -49,10 +49,24 @@ class YouTubeMusicRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Resolve stream URL and build MediaItem ready for ExoPlayer.
-     * Prefers direct (non-ciphered) audio formats.
-     */
+    suspend fun getHome(): List<Track> = withContext(Dispatchers.IO) {
+        try {
+            client.getHome().map { Track(it.videoId, it.title, it.artist, it.thumbnail) }
+        } catch (e: Exception) {
+            Log.e(tag, "Home error", e)
+            emptyList()
+        }
+    }
+
+    suspend fun getCharts(): List<Track> = withContext(Dispatchers.IO) {
+        try {
+            client.getCharts().map { Track(it.videoId, it.title, it.artist, it.thumbnail) }
+        } catch (e: Exception) {
+            Log.e(tag, "Charts error", e)
+            emptyList()
+        }
+    }
+
     suspend fun resolvePlayable(track: Track): MediaItem? = withContext(Dispatchers.IO) {
         try {
             val url = client.getDirectAudioUrl(track.videoId)
@@ -60,7 +74,7 @@ class YouTubeMusicRepository(private val context: Context) {
                 Log.i(tag, "Got direct stream for ${track.videoId}")
                 track.toMediaItem(url)
             } else {
-                Log.w(tag, "No direct stream for ${track.videoId} (ciphered?)")
+                Log.w(tag, "No direct stream for ${track.videoId}")
                 null
             }
         } catch (e: Exception) {
@@ -69,11 +83,5 @@ class YouTubeMusicRepository(private val context: Context) {
         }
     }
 
-    suspend fun resolvePlayable(videoId: String, title: String, artist: String, thumb: String?): MediaItem? {
-        return resolvePlayable(Track(videoId, title, artist, thumb))
-    }
-
-    fun close() {
-        // nothing to close for HttpURLConnection client
-    }
+    fun close() {}
 }

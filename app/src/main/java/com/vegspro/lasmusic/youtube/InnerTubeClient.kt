@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.ArrayDeque
 import java.util.UUID
 import java.util.zip.GZIPInputStream
 
@@ -239,5 +240,112 @@ class InnerTubeClient {
             }
         }
         return bestUrl
+    }
+
+    /**
+     * Charts / home shelf items (anonymous).
+     */
+    suspend fun getCharts(): List<SearchResult> = withContext(Dispatchers.IO) {
+        ensureVisitorData()
+        val body = JSONObject().apply {
+            put("context", webContext())
+            put("browseId", "FEmusic_charts")
+        }
+        val resp = post("browse", body, webKey, "https://music.youtube.com")
+            ?: return@withContext emptyList()
+        parseBrowseTracks(resp)
+    }
+
+    suspend fun getHome(): List<SearchResult> = withContext(Dispatchers.IO) {
+        ensureVisitorData()
+        val body = JSONObject().apply {
+            put("context", webContext())
+            put("browseId", "FEmusic_home")
+        }
+        val resp = post("browse", body, webKey, "https://music.youtube.com")
+            ?: return@withContext emptyList()
+        parseBrowseTracks(resp)
+    }
+
+    private fun parseBrowseTracks(json: JSONObject): List<SearchResult> {
+        val out = mutableListOf<SearchResult>()
+        try {
+            // Walk common browse structures for musicTwoRowItemRenderer / musicResponsiveListItemRenderer
+            val queue = ArrayDeque<Any>()
+            json.optJSONObject("contents")?.let { queue.add(it) }
+            json.optJSONObject("header")?.let { queue.add(it) }
+            var steps = 0
+            while (queue.isNotEmpty() && steps < 500 && out.size < 40) {
+                steps++
+                when (val node = queue.removeFirst()) {
+                    is JSONObject -> {
+                        // musicTwoRowItemRenderer
+                        node.optJSONObject("musicTwoRowItemRenderer")?.let { item ->
+                            val title = item.optJSONObject("title")
+                                ?.optJSONArray("runs")
+                                ?.optJSONObject(0)
+                                ?.optString("text") ?: return@let
+                            val videoId = item.optJSONObject("navigationEndpoint")
+                                ?.optJSONObject("watchEndpoint")
+                                ?.optString("videoId")
+                                ?: item.optJSONObject("navigationEndpoint")
+                                    ?.optJSONObject("browseEndpoint")
+                                    ?.optString("browseId")
+                            val subtitle = item.optJSONObject("subtitle")
+                                ?.optJSONArray("runs")
+                                ?.optJSONObject(0)
+                                ?.optString("text") ?: ""
+                            val thumb = item.optJSONObject("thumbnailRenderer")
+                                ?.optJSONObject("musicThumbnailRenderer")
+                                ?.optJSONObject("thumbnail")
+                                ?.optJSONArray("thumbnails")
+                                ?.let { a -> a.optJSONObject(a.length() - 1)?.optString("url") }
+                            if (!videoId.isNullOrBlank() && !videoId.startsWith("MP")) {
+                                out.add(SearchResult(videoId, title, subtitle, thumb))
+                            }
+                        }
+                        // musicResponsiveListItemRenderer
+                        node.optJSONObject("musicResponsiveListItemRenderer")?.let { item ->
+                            val videoId = item.optJSONObject("playlistItemData")?.optString("videoId")
+                            if (!videoId.isNullOrBlank()) {
+                                val flex = item.optJSONArray("flexColumns")
+                                val title = flex?.optJSONObject(0)
+                                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                    ?.optJSONObject("text")
+                                    ?.optJSONArray("runs")
+                                    ?.optJSONObject(0)
+                                    ?.optString("text") ?: "Unknown"
+                                val artist = flex?.optJSONObject(1)
+                                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                                    ?.optJSONObject("text")
+                                    ?.optJSONArray("runs")
+                                    ?.optJSONObject(0)
+                                    ?.optString("text") ?: ""
+                                val thumb = item.optJSONObject("thumbnail")
+                                    ?.optJSONObject("musicThumbnailRenderer")
+                                    ?.optJSONObject("thumbnail")
+                                    ?.optJSONArray("thumbnails")
+                                    ?.let { a -> a.optJSONObject(a.length() - 1)?.optString("url") }
+                                out.add(SearchResult(videoId, title, artist, thumb))
+                            }
+                        }
+                        val keys = node.keys()
+                        while (keys.hasNext()) {
+                            val v = node.get(keys.next())
+                            if (v is JSONObject || v is org.json.JSONArray) queue.add(v)
+                        }
+                    }
+                    is org.json.JSONArray -> {
+                        for (i in 0 until node.length()) {
+                            val v = node.get(i)
+                            if (v is JSONObject || v is org.json.JSONArray) queue.add(v)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "parseBrowseTracks", e)
+        }
+        return out.distinctBy { it.videoId }
     }
 }

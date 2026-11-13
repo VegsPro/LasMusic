@@ -120,9 +120,9 @@ fun LasMusicApp(playerViewModel: PlayerViewModel) {
             .statusBarsPadding()
     ) {
         when (selectedTab) {
-            0 -> HomeScreen(onPlayAlbum = { album -> playerViewModel.playTrack(album.mediaItem) })
+            0 -> HomeScreen(playerViewModel)
             1 -> MixScreen()
-            2 -> LibraryScreen()
+            2 -> LibraryScreen(playerViewModel)
             3 -> SearchScreen(playerViewModel)
         }
 
@@ -150,101 +150,89 @@ fun LasMusicApp(playerViewModel: PlayerViewModel) {
     }
 }
 
+
 @Composable
-fun HomeScreen(onPlayAlbum: (AlbumCard) -> Unit) {
+fun HomeScreen(playerViewModel: PlayerViewModel) {
+    val home by playerViewModel.homeTracks.collectAsState()
+    val charts by playerViewModel.chartTracks.collectAsState()
+    val loading by playerViewModel.isLoadingHome.collectAsState()
+    val status by playerViewModel.statusMessage.collectAsState()
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(bottom = 160.dp),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
         item {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = true, onClick = {},
-                        label = { Text("Все") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFFBB86FC).copy(0.3f),
-                            selectedLabelColor = Color.White
-                        )
-                    )
-                    FilterChip(
-                        selected = false, onClick = {},
-                        label = { Text("Настроение") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = Color.Transparent,
-                            labelColor = Color.White.copy(0.8f)
-                        )
-                    )
-                }
-                Row {
-                    IconButton(onClick = {}) { Icon(Icons.Default.Add, null, tint = Color.White) }
-                    IconButton(onClick = {}) { Icon(Icons.Default.Settings, null, tint = Color.White) }
+                Text("LasMusic", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                IconButton(onClick = { playerViewModel.loadHome() }) {
+                    Icon(Icons.Default.Refresh, null, tint = Color.White)
                 }
             }
         }
 
-        item {
-            SectionHeader("Рекомендуем")
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                items(recommended) { album ->
-                    AlbumCardView(album = album, onClick = { onPlayAlbum(album) })
+        if (loading && home.isEmpty()) {
+            item {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color(0xFFBB86FC))
                 }
             }
-            Spacer(Modifier.height(28.dp))
         }
 
-        item {
-            SectionHeader("Новые релизы", showMore = true)
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                items(newReleases) { album ->
-                    AlbumCardView(album = album, onClick = { onPlayAlbum(album) })
-                }
+        status?.let { msg ->
+            item {
+                Text(
+                    msg, color = Color.White.copy(0.7f), fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
             }
-            Spacer(Modifier.height(28.dp))
         }
 
-        item {
-            SectionHeader("Популярные исполнители", showMore = true)
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                items(artists) { (name, color) ->
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(90.dp)) {
-                        Box(
-                            modifier = Modifier.size(80.dp).clip(CircleShape).background(color),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(name.take(1), color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Text(name, color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (home.isNotEmpty()) {
+            item { SectionHeader("Рекомендуем") }
+            item {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    items(home.take(12), key = { it.videoId }) { track ->
+                        YtmTrackCard(track) { playerViewModel.playYtmTrack(track) }
                     }
                 }
+                Spacer(Modifier.height(28.dp))
             }
-            Spacer(Modifier.height(28.dp))
         }
 
-        item {
-            SectionHeader("Чарты")
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                items(recommended + newReleases) { album ->
-                    AlbumCardView(album = album, onClick = { onPlayAlbum(album) })
+        if (charts.isNotEmpty()) {
+            item { SectionHeader("Чарты") }
+            item {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    items(charts.take(12), key = { "c_" + it.videoId }) { track ->
+                        YtmTrackCard(track) { playerViewModel.playYtmTrack(track) }
+                    }
+                }
+                Spacer(Modifier.height(28.dp))
+            }
+        }
+
+        if (home.isEmpty() && charts.isEmpty() && !loading) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Нет данных с YouTube Music", color = Color.White.copy(0.7f))
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = { playerViewModel.loadHome() }) { Text("Обновить") }
+                    Spacer(Modifier.height(8.dp))
+                    Text("Или открой вкладку Поиск", color = Color.White.copy(0.5f), fontSize = 13.sp)
                 }
             }
         }
@@ -252,6 +240,41 @@ fun HomeScreen(onPlayAlbum: (AlbumCard) -> Unit) {
 }
 
 @Composable
+fun YtmTrackCard(
+    track: com.vegspro.lasmusic.youtube.YouTubeMusicRepository.Track,
+    onClick: () -> Unit
+) {
+    Column(modifier = Modifier.width(150.dp).clickable(onClick = onClick)) {
+        Box(
+            modifier = Modifier.size(150.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF2A2A30))
+        ) {
+            if (track.thumbnailUrl != null) {
+                AsyncImage(
+                    model = track.thumbnailUrl,
+                    contentDescription = track.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Icon(
+                    Icons.Default.MusicNote, null,
+                    tint = Color.White.copy(0.5f),
+                    modifier = Modifier.align(Alignment.Center).size(48.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            track.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            track.artist, color = Color.White.copy(0.55f), fontSize = 12.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
 fun MixScreen() {
     Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -263,26 +286,64 @@ fun MixScreen() {
     }
 }
 
+
 @Composable
-fun LibraryScreen() {
+fun LibraryScreen(playerViewModel: PlayerViewModel) {
+    val liked by playerViewModel.likedTracks.collectAsState()
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(bottom = 160.dp).padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)
     ) {
         item {
-            Text("Библиотека", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 16.dp))
+            Text(
+                "Библиотека",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
         }
-        items(libraryItems) { (title, icon) ->
-            Row(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { }
-                    .padding(vertical = 14.dp, horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(icon, null, tint = Color(0xFFBB86FC), modifier = Modifier.size(28.dp))
-                Spacer(Modifier.width(16.dp))
-                Text(title, color = Color.White, fontSize = 17.sp)
+        item {
+            Text("Любимое", color = Color.White.copy(0.8f), fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 8.dp))
+        }
+        if (liked.isEmpty()) {
+            item {
+                Text(
+                    "Пока пусто — лайкай треки в поиске (скоро)",
+                    color = Color.White.copy(0.5f),
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+        } else {
+            items(liked, key = { it.videoId }) { track ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { playerViewModel.playYtmTrack(track) }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AsyncImage(
+                        model = track.thumbnailUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))
+                            .background(Color.White.copy(0.08f))
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(track.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(track.artist, color = Color.White.copy(0.6f), fontSize = 13.sp, maxLines = 1)
+                    }
+                    IconButton(onClick = { playerViewModel.toggleLike(track) }) {
+                        Icon(Icons.Default.Favorite, null, tint = Color(0xFFBB86FC))
+                    }
+                }
             }
         }
     }
