@@ -19,7 +19,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val tag = "PlayerVM"
     private val app = application
 
-    private var musicPlayer: MusicPlayer? = null
+    @Volatile private var musicPlayer: MusicPlayer? = null
     private val ytm by lazy { YouTubeMusicRepository(app) }
     private val prefs by lazy { app.getSharedPreferences("lasmusic_likes", Context.MODE_PRIVATE) }
 
@@ -28,9 +28,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _currentItem = MutableStateFlow<MediaItem?>(null)
     val currentItem: StateFlow<MediaItem?> = _currentItem.asStateFlow()
-
-    private val _queue = MutableStateFlow<List<MediaItem>>(emptyList())
-    val queue: StateFlow<List<MediaItem>> = _queue.asStateFlow()
 
     private val _searchResults = MutableStateFlow<List<YouTubeMusicRepository.Track>>(emptyList())
     val searchResults: StateFlow<List<YouTubeMusicRepository.Track>> = _searchResults.asStateFlow()
@@ -54,46 +51,21 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
     init {
-        Log.i(tag, "ViewModel init")
-        try {
-            loadLikesFromDisk()
-        } catch (e: Exception) {
-            Log.e(tag, "loadLikes", e)
-        }
-        // Defer network + player to after first frame
+        Log.i(tag, "init")
+        try { loadLikesFromDisk() } catch (e: Exception) { Log.e(tag, "likes", e) }
         viewModelScope.launch {
-            try {
-                ensurePlayer()
-            } catch (e: Exception) {
-                Log.e(tag, "player init", e)
-            }
-            try {
-                loadHome()
-            } catch (e: Exception) {
-                Log.e(tag, "loadHome", e)
-            }
+            try { loadHome() } catch (e: Exception) { Log.e(tag, "home", e) }
         }
     }
 
     private fun ensurePlayer(): MusicPlayer {
-        val existing = musicPlayer
-        if (existing != null) return existing
+        musicPlayer?.let { return it }
         synchronized(this) {
-            val again = musicPlayer
-            if (again != null) return again
-            Log.i(tag, "Creating MusicPlayer")
+            musicPlayer?.let { return it }
+            Log.i(tag, "create player")
             val p = MusicPlayer(app, viewModelScope)
-            // Mirror state into VM flows
-            viewModelScope.launch {
-                p.isPlaying.collect { _isPlaying.value = it }
-            }
-            viewModelScope.launch {
-                p.currentItem.collect { _currentItem.value = it }
-            }
-            viewModelScope.launch {
-                p.queue.collect { _queue.value = it }
-            }
-            p.setInfiniteMode(true)
+            viewModelScope.launch { p.isPlaying.collect { _isPlaying.value = it } }
+            viewModelScope.launch { p.currentItem.collect { _currentItem.value = it } }
             musicPlayer = p
             return p
         }
@@ -102,11 +74,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun loadHome() {
         viewModelScope.launch {
             _isLoadingHome.value = true
+            _statusMessage.value = "Загрузка…"
             try {
-                _homeTracks.value = ytm.getHome()
-                _chartTracks.value = ytm.getCharts()
+                val h = ytm.getHome()
+                val c = ytm.getCharts()
+                _homeTracks.value = h
+                _chartTracks.value = c
+                _statusMessage.value = if (h.isEmpty() && c.isEmpty()) "Нет данных (сеть?)" else null
             } catch (e: Exception) {
                 Log.e(tag, "loadHome", e)
+                _statusMessage.value = "Ошибка сети"
             } finally {
                 _isLoadingHome.value = false
             }
@@ -118,12 +95,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             _isSearching.value = true
             _statusMessage.value = "Поиск…"
             try {
-                val results = ytm.search(query)
-                _searchResults.value = results
-                _statusMessage.value = if (results.isEmpty()) "Ничего не найдено" else "Найдено: ${results.size}"
+                val r = ytm.search(query)
+                _searchResults.value = r
+                _statusMessage.value = if (r.isEmpty()) "Ничего не найдено" else "Найдено: ${r.size}"
             } catch (e: Exception) {
+                Log.e(tag, "search", e)
                 _statusMessage.value = "Ошибка поиска"
-                _searchResults.value = emptyList()
             } finally {
                 _isSearching.value = false
             }
@@ -139,26 +116,25 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     val p = ensurePlayer()
                     p.setQueue(listOf(item), 0)
                     p.play()
+                    // auto-like optional skip
                     _statusMessage.value = null
                 } else {
-                    _statusMessage.value = "Поток недоступен. Попробуй другой трек."
+                    _statusMessage.value = "Поток недоступен"
                 }
             } catch (e: Exception) {
-                Log.e(tag, "playYtmTrack", e)
-                _statusMessage.value = "Ошибка воспроизведения"
+                Log.e(tag, "play", e)
+                _statusMessage.value = "Ошибка: ${e.message?.take(40)}"
             }
         }
     }
 
     fun toggleLike(track: YouTubeMusicRepository.Track) {
-        val current = _likedTracks.value.toMutableList()
-        val idx = current.indexOfFirst { it.videoId == track.videoId }
-        if (idx >= 0) current.removeAt(idx) else current.add(0, track)
-        _likedTracks.value = current
-        saveLikesToDisk(current)
+        val list = _likedTracks.value.toMutableList()
+        val idx = list.indexOfFirst { it.videoId == track.videoId }
+        if (idx >= 0) list.removeAt(idx) else list.add(0, track)
+        _likedTracks.value = list
+        saveLikesToDisk(list)
     }
-
-    fun isLiked(videoId: String): Boolean = _likedTracks.value.any { it.videoId == videoId }
 
     private fun loadLikesFromDisk() {
         val raw = prefs.getString("likes_json", "[]") ?: "[]"
@@ -193,27 +169,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun togglePlayPause() = try { ensurePlayer().togglePlayPause() } catch (e: Exception) { Log.e(tag, "toggle", e) }
     fun next() = try { ensurePlayer().seekToNext() } catch (e: Exception) { Log.e(tag, "next", e) }
-    fun previous() = try { ensurePlayer().seekToPrevious() } catch (e: Exception) { Log.e(tag, "prev", e) }
-
-    fun playQueue(items: List<MediaItem>, startIndex: Int = 0) {
-        if (items.isEmpty()) return
-        try {
-            val p = ensurePlayer()
-            p.setQueue(items, startIndex)
-            p.play()
-        } catch (e: Exception) {
-            Log.e(tag, "playQueue", e)
-        }
-    }
-
-    fun playTrack(item: MediaItem) {
-        val related = try { SimilarTrackProvider.getSimilar(item, limit = 6) } catch (_: Exception) { emptyList() }
-        playQueue(listOf(item) + related)
-    }
 
     override fun onCleared() {
         try { musicPlayer?.release() } catch (_: Exception) {}
-        try { ytm.close() } catch (_: Exception) {}
         super.onCleared()
     }
 }

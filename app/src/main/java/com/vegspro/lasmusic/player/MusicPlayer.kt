@@ -1,6 +1,7 @@
 package com.vegspro.lasmusic.player
 
 import android.content.Context
+import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -11,21 +12,16 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.DefaultDataSource
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 
-/**
- * Progressive streaming + infinite playlist player.
- */
 class MusicPlayer(
-    private val context: Context,
-    private val scope: CoroutineScope
+    context: Context,
+    @Suppress("UNUSED_PARAMETER") scope: CoroutineScope
 ) {
+    private val tag = "MusicPlayer"
+
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
@@ -35,26 +31,17 @@ class MusicPlayer(
     private val _queue = MutableStateFlow<List<MediaItem>>(emptyList())
     val queue: StateFlow<List<MediaItem>> = _queue.asStateFlow()
 
-    private var infiniteMode = true
-    private var recommendationJob: Job? = null
+    private val httpFactory = DefaultHttpDataSource.Factory()
+        .setAllowCrossProtocolRedirects(true)
+        .setConnectTimeoutMs(12_000)
+        .setReadTimeoutMs(20_000)
+        .setUserAgent("LasMusic/1.4")
+
+    private val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
 
     private val loadControl = DefaultLoadControl.Builder()
-        .setBufferDurationsMs(
-            15_000,  // minBuffer
-            50_000,  // maxBuffer
-            1_500,   // bufferForPlayback
-            3_000    // bufferForPlaybackAfterRebuffer
-        )
-        .setPrioritizeTimeOverSizeThresholds(true)
+        .setBufferDurationsMs(10_000, 40_000, 1_000, 2_500)
         .build()
-
-    private val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-        .setAllowCrossProtocolRedirects(true)
-        .setConnectTimeoutMs(10_000)
-        .setReadTimeoutMs(15_000)
-        .setUserAgent("LasMusic/1.0.2")
-
-    private val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
 
     val player: ExoPlayer = ExoPlayer.Builder(context)
         .setAudioAttributes(
@@ -76,85 +63,63 @@ class MusicPlayer(
 
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     _currentItem.value = mediaItem
-                    maybeRequestMoreTracks()
                 }
 
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_ENDED) {
-                        maybeRequestMoreTracks(force = true)
-                    }
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    Log.e(tag, "Player error: ${error.message}")
                 }
             })
         }
 
     fun setQueue(items: List<MediaItem>, startIndex: Int = 0) {
         if (items.isEmpty()) return
-        _queue.value = items
-        // Important: do NOT seek next/previous — that was causing wrong track to start
-        player.setMediaItems(items, startIndex, 0L)
-        player.prepare()
-        _currentItem.value = items.getOrNull(startIndex)
-    }
-
-    fun addToQueue(items: List<MediaItem>) {
-        if (items.isEmpty()) return
-        val newQueue = _queue.value + items
-        _queue.value = newQueue
-        player.addMediaItems(items)
-        maybeRequestMoreTracks()
+        try {
+            player.stop()
+            player.clearMediaItems()
+            player.setMediaItems(items, startIndex.coerceIn(0, items.lastIndex), 0L)
+            player.prepare()
+            _queue.value = items
+            _currentItem.value = items.getOrNull(startIndex.coerceIn(0, items.lastIndex))
+        } catch (e: Exception) {
+            Log.e(tag, "setQueue", e)
+        }
     }
 
     fun play() {
-        player.play()
+        try { player.play() } catch (e: Exception) { Log.e(tag, "play", e) }
     }
 
     fun pause() {
-        player.pause()
+        try { player.pause() } catch (e: Exception) { Log.e(tag, "pause", e) }
     }
 
     fun togglePlayPause() {
-        if (player.isPlaying) player.pause() else player.play()
+        try {
+            if (player.isPlaying) player.pause() else player.play()
+        } catch (e: Exception) {
+            Log.e(tag, "toggle", e)
+        }
     }
 
     fun seekToNext() {
-        if (player.hasNextMediaItem()) {
-            player.seekToNextMediaItem()
-        } else {
-            maybeRequestMoreTracks(force = true)
+        try {
+            if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+        } catch (e: Exception) {
+            Log.e(tag, "next", e)
         }
     }
 
     fun seekToPrevious() {
-        if (player.hasPreviousMediaItem()) {
-            player.seekToPreviousMediaItem()
+        try {
+            if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem()
+        } catch (e: Exception) {
+            Log.e(tag, "prev", e)
         }
     }
 
-    fun setInfiniteMode(enabled: Boolean) {
-        infiniteMode = enabled
-        if (enabled) maybeRequestMoreTracks()
-    }
-
-    private fun maybeRequestMoreTracks(force: Boolean = false) {
-        if (!infiniteMode) return
-        val remaining = player.mediaItemCount - player.currentMediaItemIndex - 1
-        if (!force && remaining > 2) return
-
-        recommendationJob?.cancel()
-        recommendationJob = scope.launch(Dispatchers.IO) {
-            delay(400)
-            val current = player.currentMediaItem ?: return@launch
-            val similar = SimilarTrackProvider.getSimilar(current, limit = 6)
-            if (similar.isNotEmpty()) {
-                launch(Dispatchers.Main) {
-                    addToQueue(similar)
-                }
-            }
-        }
-    }
+    fun setInfiniteMode(@Suppress("UNUSED_PARAMETER") enabled: Boolean) {}
 
     fun release() {
-        recommendationJob?.cancel()
-        player.release()
+        try { player.release() } catch (_: Exception) {}
     }
 }
