@@ -275,6 +275,7 @@ fun YtmTrackCard(
     }
 }
 
+@Composable
 fun MixScreen() {
     Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
